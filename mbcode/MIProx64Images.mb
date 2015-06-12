@@ -1,0 +1,230 @@
+Include "MapBasic.def"
+Include "Enums.def"
+
+Include "Library\MI_ICONS_X64.def"
+
+Include "Library\ARRAYLib.def"
+Include "Library\MAPPERLib.def"
+Include "Library\ProgramInfo.def"
+Include "Library\RIBBONLib.def"
+Include "Library\STRINGLib.def"
+
+Declare Sub Main
+Declare Sub EndHandler
+
+Declare Sub LoadImagesFromFile
+Declare Sub MENUShowImageDetails
+Declare Function GetNiceGroupName(ByVal sGroupName As String) As String
+
+Declare Method CopyTextToClipboard Class "MapBasicTest.Controller"  Lib "MapBasicTest.dll" (ByVal sText As String)
+
+
+Dim	mnControlID() As Integer,
+	marrImageNames(), marrImageGroups(), marrImageFiles()As String,
+	marrGroupControlIDs(), marrImageControlIDs() As Integer,
+	marrGroupNames() As String,
+	marrGroupCount() As Integer
+'*************************************
+Sub Main
+
+Dim	nCtrlIdx, nGroup, nImage, nImageGroup, nCount As Integer,
+	sTabName, sGroupName, sSplitButtonName, sSplitButtonGroupName, sSplitButtonControlName As String
+
+	'***Initializing ProgramInfo
+	Call PRGISetApplicationName("MI Pro x64 Images")
+	Call PRGISetApplicationVersion("1.0")
+	Call PRGISetApplicationCopyrightYear("2015")
+	Call PRGISetApplicationDevelopedBy("Peter Horsbøll Møller")
+	Call PRGISetCopyrightCompany("Pitney Bowes")
+	Call PRGISetWebPageName("mapinfo.com")
+	Call PRGISetWebPageURL("http://www.mapinfo.com")
+	Call PRGISetApplicationImageUri(MI_IMG_WIN_TOOLMANAGER_32)
+	Call PRGISetDescription("This tools lists all the images for MapInfo Pro 12.5 x64")
+
+	Call RBNNotificationShow(PRGIGetApplicationName(), "Launching...", Notify_Info, 2000)
+
+	Call LoadImagesFromFile
+
+	'**Checking for the existence of a TAB named tabMyFirstApp
+	sTabName	= "tabMIProImages"
+	If NOT RBNTabExists(sTabName) Then
+		nCtrlIdx = RBNAddTab(sTabName, "MI PRO IMAGES", "F")
+		If nCtrlIdx = 0 Then
+			Note "An error occured while adding a new tab called & '" & sTabName & "' to the ribbon!"
+			Exit Sub
+		End If
+	End If
+
+	Print "-------------------------------------------------------"
+	For nGroup = 1 To Ubound(marrGroupNames)
+		Print nGroup & " of " & Ubound(marrGroupNames) & ": Group: " & GetNiceGroupName(marrGroupNames(nGroup))
+		nImageGroup	= 0
+		nCount		= 0
+
+		sGroupName	= "grp" & marrGroupNames(nGroup)
+		If NOT RBNTabGroupExists(sTabName, sGroupName) Then
+			nCtrlIdx = RBNTabAddGroup(sGroupName, GetNiceGroupName(marrGroupNames(nGroup)), sTabName)
+			If NOT nCtrlIdx > 0 Then
+				Exit Sub
+			End If
+		End If
+
+		For nImage = 1 To Ubound(marrImageNames)
+			If marrImageGroups(nImage) = marrGroupNames(nGroup) Then
+				nCount		= nCount + 1
+
+				If nCount Mod 40 = 1 Then
+					nImageGroup 		= nImageGroup + 1
+					sSplitButtonName	= "sbtn" & marrGroupNames(nGroup) & "_" & nImageGroup
+					Print "   Adding SplitButton " & GetNiceGroupName(marrGroupNames(nGroup)) & " " & nImageGroup
+					nCtrlIdx	= RBNGroupAddControl(sSplitButtonName, GetNiceGroupName(marrGroupNames(nGroup)) & " " & nImageGroup, "", ControlType_SplitButton, sTabName, sGroupName)
+					If nCtrlIdx > 0 Then
+						'Set the button icon
+						Call RBNControlSetIconsIdx(nCtrlIdx, CONTROL_SIZE_SMALL, "", marrImageFiles(nImage))
+						'**Set the handler to match the handler of the first button
+						Call RBNControlSetCustomMBXHandlerIdx(nCtrlIdx, "MENUShowImageDetails")
+						'**Get the ID of the SplitButton - needed in the handler
+						marrGroupControlIDs(nGroup)	= RBNControlGetControlIDIdx(nCtrlIdx)
+
+						sSplitButtonGroupName	= "sbgrp" & marrGroupNames(nGroup) & "_" & nImageGroup
+						'Print "   Adding SplitButtonGroup " & sSplitButtonName
+						nCtrlIdx	= RBNSplitButtonAddGroup(sSplitButtonGroupName, "", sTabName, sGroupName, sSplitButtonName)
+					End If
+				End If
+
+				sSplitButtonControlName	= "sbtnc" & marrGroupNames(nGroup) & "_" & nImageGroup & "_" & nCount
+				'Print "      Adding SplitButton Control " & sSplitButtonControlName & " for " & marrImageNames(nImage) & " " & marrImageFiles(nImage)
+				nCtrlIdx = RBNSplitButtonGroupAddControl(sSplitButtonControlName, Right$(marrImageNames(nImage), (Len(marrImageNames(nImage)) - Len(marrGroupNames(nGroup)) - 1)), ""
+							, ControlType_Button, sTabName, sGroupName, sSplitButtonName, sSplitButtonGroupName)
+				If nCtrlIdx > 0 Then
+					'Create & Set the button tooltip
+					Call RBNControlSetToolTipIdx(nCtrlIdx, PRGIGetApplicationName(), "Image Info: " & marrImageNames(nImage), "")
+					'Set the button icon
+					Call RBNControlSetIconsIdx(nCtrlIdx, CONTROL_SIZE_SMALL, "", marrImageFiles(nImage))
+					'Set Custom MapBasic Handle to the button
+					Call RBNControlSetCustomMBXHandlerIdx(nCtrlIdx, "MENUShowImageDetails")
+
+					marrImageControlIDs(nImage)	= RBNControlGetControlIDIdx(nCtrlIdx)
+				End If
+
+			End If
+		Next	'nImage
+	Next	'nGroup
+
+End Sub
+
+'*************************************
+Sub Endhandler
+
+	'**Ask the RibbonLib to tidy up before the app ends
+	Call RBNEndHandler
+
+End Sub
+
+'*************************************
+Sub LoadImagesFromFile
+
+Dim	sLine, arrItems(), sName, sGroup, sImage As String,
+	nItems, nMax, nGroup As Integer
+
+	Open File ApplicationDirectory$() & "MI_ICONS_X64.def"
+		For Input
+		As #123
+
+	Do Until EOF(123)
+		'**Define MI_IMG_APP_CLOSEALL_16                         "pack://application:,,,/MapInfo.StyleResources;component/Images/Application/closeAll_16x16.png"
+		Line Input #123, sLine
+
+		nItems	= STRINGSplit(sLine, " ", arrItems)
+
+		sName	= arrItems(2)
+		If Right$(sName, 2) = "32" Then
+			sGroup	= Left$(sName, 10)
+			sImage	= arrItems(nItems)
+			sImage	= STRINGGetValueBetweenChars(sImage, Chr$(34), Chr$(34))
+
+			Call ARRAYAddValueString(marrImageNames, sName)
+			Call ARRAYAddValueString(marrImageGroups, sGroup)
+			Call ARRAYAddValueString(marrImageFiles, sImage)
+			Call ARRAYAddValueInteger(marrImageControlIDs, 0)
+
+			nGroup = ARRAYFindValueString(marrGroupNames(), sGroup)
+			If nGroup = 0 Then
+				Call ARRAYAddValueString(marrGroupNames, sGroup)
+				nGroup = Ubound(marrGroupNames)
+				Redim marrGroupCount(nGroup)
+				Redim marrGroupControlIDs(nGroup)
+			End If
+			marrGroupCount(nGroup) = marrGroupCount(nGroup) + 1
+
+			nMax	= Maximum(nMax, marrGroupCount(nGroup))
+		End If
+	Loop
+
+	Print "Number of Images: " & Ubound(marrImageNames)
+	Print "Number of Image Groups: " & Ubound(marrGroupNames)
+	Print "Max. Number of Image in a Groups: " & nMax
+
+	Close File #123
+
+End Sub
+
+Sub MENUShowImageDetails
+
+Dim	nCtrl, nItem As Integer
+
+	nCtrl	= CommandInfo(CMD_INFO_TOOLBTN)
+	nItem	= ARRAYFindValueInteger(marrGroupControlIDs, nCtrl)
+	If nItem = 0 Then
+		nItem	= ARRAYFindValueInteger(marrImageControlIDs, nCtrl)
+		If nItem = 0 Then
+			Note "Control ID not found: " & nCtrl
+		End If
+	Else
+		nItem = ARRAYFindValueString(marrImageGroups, marrGroupNames(nItem))
+	End If
+
+	Note "Define: " & marrImageNames(nItem)
+			& Chr$(10) & "Image: " & marrImageFiles(nItem)
+			& Chr$(10)
+			& Chr$(10) & "Define and File Name has been put into your Clipboard, Use Ctrl + V to insert into your code"
+
+	Call CopyTextToClipboard(marrImageNames(nItem) & Chr$(9) & Chr$(34) & marrImageFiles(nItem) & Chr$(34))
+
+End Sub
+
+Function GetNiceGroupName(ByVal sGroupName As String) As String
+
+	Do Case sGroupName
+		Case "MI_IMG_APP"
+			GetNiceGroupName	= "Application"
+		Case "MI_IMG_WIN"
+			GetNiceGroupName	= "Window"
+		Case "MI_IMG_MAP"
+			GetNiceGroupName	= "Map"
+		Case "MI_IMG_TAB"
+			GetNiceGroupName	= "Table"
+		Case "MI_IMG_LAY"
+			GetNiceGroupName	= "Layer"
+		Case "MI_IMG_SPA"
+			GetNiceGroupName	= "Spatial"
+		Case "MI_IMG_RAS"
+			GetNiceGroupName	= "Raster"
+		Case "MI_IMG_ORA"
+			GetNiceGroupName	= "Oracle"
+		Case "MI_IMG_LAB"
+			GetNiceGroupName	= "Label"
+		Case "MI_IMG_LYR"
+			GetNiceGroupName	= "Layer"
+		Case "MI_IMG_TLS"
+			GetNiceGroupName	= "Tools"
+		Case "MI_IMG_TSK"
+			GetNiceGroupName	= "Task"
+		Case "MI_IMG_LEG"
+			GetNiceGroupName	= "Legend"
+
+		Case Else
+			GetNiceGroupName	= sGroupName
+	End Case
+
+End Function
